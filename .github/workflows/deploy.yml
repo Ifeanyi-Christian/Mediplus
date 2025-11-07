@@ -80,7 +80,7 @@ jobs:
           echo "Updating image in deployment.yaml..."
           sed -i "s|209888747223.dkr.ecr.eu-north-1.amazonaws.com/mediplus:.*|209888747223.dkr.ecr.eu-north-1.amazonaws.com/mediplus:${{ github.run_number }}|g" deployment.yaml
 
-          git config user.email "okwuigboifeanyichristian@gmail.com"
+          git config user.email "okwuigbo.i.c@gmail.com"
           git config user.name "$GIT_USERNAME"
 
           git add deployment.yaml
