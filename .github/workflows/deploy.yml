@@ -22,19 +22,18 @@ jobs:
           aws-region: eu-north-1
 
       - name: Login to Amazon ECR
-        id: login-ecr
         run: |
           aws ecr get-login-password --region eu-north-1 | docker login --username AWS --password-stdin 209888747223.dkr.ecr.eu-north-1.amazonaws.com
 
       - name: Build, Tag, and Push Image to Amazon ECR
-        id: build-image
         run: |
-          IMAGE_URI=209888747223.dkr.ecr.eu-north-1.amazonaws.com/mediplus:GIT_RUN_NUMBER
+          IMAGE_TAG=${{ github.run_number }}
+          IMAGE_URI=209888747223.dkr.ecr.eu-north-1.amazonaws.com/mediplus:${IMAGE_TAG}
           echo "Building Docker image..."
           docker build -t $IMAGE_URI .
           echo "Pushing image to ECR..."
           docker push $IMAGE_URI
-          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV  # save for next job
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
 
   deploy:
     name: Deploy to EC2
@@ -49,44 +48,43 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.SSH_KEY }}
           script: |
+            IMAGE_URI=209888747223.dkr.ecr.eu-north-1.amazonaws.com/mediplus:${{ github.run_number }}
             echo "Logging into ECR..."
             aws ecr get-login-password --region eu-north-1 | docker login --username AWS --password-stdin 209888747223.dkr.ecr.eu-north-1.amazonaws.com
 
             echo "Pulling latest image..."
-            docker pull 209888747223.dkr.ecr.eu-north-1.amazonaws.com/mediplus:GIT_RUN_NUMBER
+            docker pull $IMAGE_URI
 
             echo "Stopping old container (if running)..."
             docker stop mediplus-container || true
             docker rm mediplus-container || true
 
             echo "Running new container..."
-            docker run -d -p 80:80 --name mediplus-container 209888747223.dkr.ecr.eu-north-1.amazonaws.com/mediplus:GIT_RUN_NUMBER
+            docker run -d -p 80:80 --name mediplus-container $IMAGE_URI
 
             echo "Deployment complete!"
 
-
   update-k8-yaml:
-        runs-on: ubuntu-latest
-        needs: build and deploy
+    name: Update Kubernetes Manifest Repo
+    runs-on: ubuntu-latest
+    needs: deploy  
+    steps:
+      - name: Clone K8s YAML repository
+        env:
+          GIT_USERNAME: ${{ secrets.GIT_USERNAME }}
+          GIT_PASSWORD: ${{ secrets.GIT_PASSWORD }}
+        run: |
+          git clone https://$GIT_USERNAME:$GIT_PASSWORD@github.com/Ifeanyi-Christian/kubernetes-manifest-yaml.git
+          cd kubernetes-manifest-yaml
 
-        steps:
-            - name: clone-k8s-yaml repo
-              env:
-                GIT_USERNAME: ${{ secret_GET_USERNAME }}
-                GiT_PASSWORD: ${ secret_GET _PASSWORD}}
-              run: |
-                git clone https://$GIT_USERNAME}:{GIT_PASSWORD}@github.com/Ifeanyi-Christian/kubernetes-manifest-yaml.git
-                cd kubernetes-manifest-yaml
-                cat deployment.yaml
-                sed -1"s+209888747223.dkr.ecr.eu-north-1.amazonaws.com/mediplus:GIT_RUN_NUMBER:.*+209888747223.dkr.ecr.eu-north-1.amazonaws.com/mediplus:GIT_RUN_NUMBER+g"deployment.yaml
-                cat deployment.yaml
+          echo "Updating image in deployment.yaml..."
+          sed -i "s|209888747223.dkr.ecr.eu-north-1.amazonaws.com/mediplus:.*|209888747223.dkr.ecr.eu-north-1.amazonaws.com/mediplus:${{ github.run_number }}|g" deployment.yaml
 
-                git config user.email okwuigboifeanyichristian@gmail.com
-                git config user.name GIT_USERNAME}
+          git config user.email "okwuigboifeanyichristian@gmail.com"
+          git config user.name "$GIT_USERNAME"
 
-                git add .
-                git commit -m "updated the k8 yaml"
-                git push https://$GIT_USERNAME}:{GIT_PASSWORD}@github.com/Ifeanyi-Christian/kubernetes-manifest-yaml.git HEAD main
-                
-                
+          git add deployment.yaml
+          git commit -m "Updated mediplus image to tag ${{ github.run_number }}"
+          git push https://$GIT_USERNAME:$GIT_PASSWORD@github.com/Ifeanyi-Christian/kubernetes-manifest-yaml.git HEAD:main
+
 
